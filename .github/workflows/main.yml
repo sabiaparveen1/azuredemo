@@ -1,47 +1,45 @@
-name: build_deploy_aks
+name: Build and Deploy to AKS
+
 on:
   push:
-    paths:
-      - "azure-vote/**"
+    branches:
+      - master
+
+env:
+  REGISTRY: ghcr.io/sabiaparveen1/my-app:latest   # Replace with your GitHub Artifact Registry URL
+  IMAGE_NAME: my-app  # Replace with your Docker image name
+  AKS_CLUSTER: myAKSCluster  # Replace with your AKS cluster name
+  AKS_NAMESPACE: default  # Replace with your AKS namespace
+
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout source code
-        uses: actions/checkout@v3
-      - name: ACR build
-        id: build-push-acr
-        uses: azure/acr-build@v1
-        with:
-          service_principal: ${{ secrets.service_principal }}
-          service_principal_password: ${{ secrets.service_principal_password }}
-          tenant: ${{ secrets.tenant }}
-          registry: ${{ secrets.registry }}
-          repository: ${{ secrets.repository }}
-          image:  azuredemoimg
-          folder: azure-vote
-          branch: master
-          tag: ${{ github.sha }}
-      - name: Azure login
-        id: login
-        uses: azure/login@v1.4.3
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-      - name: Set AKS context
-        id: set-context
-        uses: azure/aks-set-context@v3
-        with:
-          resource-group: '${{ secrets.resource_group }}'
-          cluster-name: '${{ secrets.cluster_name }}'
-      - name: Setup kubectl
-        id: install-kubectl
-        uses: azure/setup-kubectl@v3
+      - uses: actions/checkout@v2
+      - name: Checkout code
+
+      - name: Set up Docker
+      - uses: docker/setup-docker@v1
+
+      - name: Log in to GitHub Artifact Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login "${{ env.REGISTRY }}" -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" .
+          docker push "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
       - name: Deploy to AKS
-        id: deploy-aks
-        uses: Azure/k8s-deploy@v4
+        uses: azure/aks-set-context@v1
         with:
-          namespace: 'default'
-          manifests: |
-            azure-vote-all-in-one-redis.yaml
-          images: '${{ secrets.registry }}.azurecr.io/${{ secrets.repository }}/azure-vote-front:${{ github.sha }}'
-          pull-images: false
+          creds: '${{ secrets.AZURE_CREDENTIALS }}'
+          cluster-name: ${{ env.AKS_CLUSTER }}
+          resource-group: myResourceGroup  # Replace with your AKS resource group name
+
+      - name: Apply Kubernetes manifest
+        uses: azure/k8s-set-context@v1
+        with:
+          kubeconfig: ${{ env.AKS_CLUSTER }}  # AKS cluster context
+        run: |
+          kubectl apply -f path/to/k8s/manifests/deployment.yaml --namespace ${{ env.AKS_NAMESPACE }}
+          kubectl apply -f path/to/k8s/manifests/service.yaml --namespace ${{ env.AKS_NAMESPACE }}
